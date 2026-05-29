@@ -3,6 +3,14 @@ import { Trash2, Sparkles, Image as ImageIcon, Loader2, Copy, ArrowDownRight, Li
 import { toast } from "sonner";
 import { supabase } from "../lib/supabase";
 
+declare global {
+  interface Window {
+    pendo?: {
+      track: (eventName: string, properties?: Record<string, unknown>) => void;
+    };
+  }
+}
+
 interface Shot {
   id: string;
   angle: string;
@@ -497,6 +505,11 @@ function AuthModal({ isOpen, onClose, lang, t, initialMode }: AuthModalProps) {
         }
       });
       if (error) throw error;
+      // Pendo Track: Google OAuth initiated
+      window.pendo?.track("google_oauth_initiated", {
+        auth_provider: "google",
+        language: lang,
+      });
     } catch (err: any) {
       console.error("Google Auth error:", err);
       setErrorMsg(err.message || (lang === "id" ? "Gagal masuk dengan Google." : "Google login failed."));
@@ -532,6 +545,11 @@ function AuthModal({ isOpen, onClose, lang, t, initialMode }: AuthModalProps) {
           password,
         });
         if (error) throw error;
+        // Pendo Track: User logged in
+        window.pendo?.track("user_logged_in", {
+          auth_method: "email_password",
+          language: lang,
+        });
         toast.success(lang === "id" ? "Berhasil masuk ke studio!" : "Successfully logged in!");
         onClose();
       } else {
@@ -540,6 +558,13 @@ function AuthModal({ isOpen, onClose, lang, t, initialMode }: AuthModalProps) {
           password,
         });
         if (error) throw error;
+        // Pendo Track: User signed up
+        window.pendo?.track("user_signed_up", {
+          auth_method: "email_password",
+          has_immediate_session: !!data?.session,
+          signup_source: "auth_modal",
+          language: lang,
+        });
         if (data?.session) {
           toast.success(lang === "id" ? "Akun berhasil dibuat dan masuk!" : "Account created and logged in!");
         } else {
@@ -840,6 +865,14 @@ export function VibeShotPlatform() {
             setCloudBriefId(sharedId);
             setHasResult(true);
             setView("app");
+            // Pendo Track: Shared brief viewed
+            window.pendo?.track("shared_brief_viewed", {
+              brief_id: sharedId,
+              has_shots: (cloudData.shotlist || []).length > 0,
+              shot_count: (cloudData.shotlist || []).length,
+              visual_style: cloudData.visual_style || "real-life",
+              language: lang,
+            });
             setIsGenerating(false);
             return;
           }
@@ -889,16 +922,36 @@ export function VibeShotPlatform() {
   };
 
   const handleClearAll = () => {
+    // Capture state before clearing for tracking
+    const hadBrief = !!cloudBriefId;
+    const hadShots = shots.length > 0;
+    const shotCountBeforeClear = shots.length;
     localStorage.clear();
     window.history.replaceState({}, document.title, window.location.pathname);
     setShots([]); setMoodboard([]); setPremiseOverride(null); setTitleOverride(null); setMasterIdentity(null); setCloudBriefId(null); setHasResult(false); setRefType("link"); setRefUrl(""); setRefTextDescription(""); setRefImageBase64(""); setImageModel("fal-ai/flux/schnell"); setView("app");
+    // Pendo Track: Workspace cleared
+    window.pendo?.track("workspace_cleared", {
+      had_existing_brief: hadBrief,
+      had_existing_shots: hadShots,
+      shot_count_before_clear: shotCountBeforeClear,
+      language: lang,
+    });
     toast.success(lang === "id" ? "Workspace dibersihkan." : "Workspace cleared.");
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     if (file.size > 4 * 1024 * 1024) { toast.error(lang === "id" ? "File maksimal 4MB." : "Max file size is 4MB."); return; }
-    const reader = new FileReader(); reader.onloadend = () => { setRefImageBase64(reader.result as string); toast.success(lang === "id" ? "Aset visual terkunci." : "Visual asset cached."); };
+    const reader = new FileReader(); reader.onloadend = () => {
+      setRefImageBase64(reader.result as string);
+      // Pendo Track: Reference image uploaded
+      window.pendo?.track("reference_image_uploaded", {
+        file_size_bytes: file.size,
+        file_type: file.type,
+        language: lang,
+      });
+      toast.success(lang === "id" ? "Aset visual terkunci." : "Visual asset cached.");
+    };
     reader.readAsDataURL(file);
   };
 
@@ -926,8 +979,35 @@ export function VibeShotPlatform() {
       const normalized = (data.shotlist || []).map((r: any) => ({ id: crypto.randomUUID(), angle: String(r?.angle || ""), location: String(r?.location || ""), tech_budget_hack: String(r?.tech_budget_hack || ""), action: String(r?.action || ""), audio: String(r?.audio || ""), image: String(r?.image || ""), imagePrompt: String(r?.imagePrompt || ""), }));
       setShots(normalized); setMoodboard(data.moodboard || []); setPremiseOverride(data.premise); setTitleOverride(data.title); setMasterIdentity(data.master_identity); setVisualStyle(data.visual_style || "real-life"); setCloudBriefId(data.briefId || null); setHasResult(true);
       saveToLocalStorage( normalized, data.moodboard || [], data.premise, data.title, data.master_identity, data.visual_style, data.briefId || null );
+      // Pendo Track: Brief generated successfully
+      window.pendo?.track("brief_generated", {
+        engine_mode: activeEngine,
+        platform: platform,
+        pillar: pillar,
+        talent: talent,
+        shot_count: shotCount,
+        ref_type: refType,
+        image_model: imageModel,
+        visual_style: data.visual_style || "real-life",
+        has_product_name: !!productName,
+        has_usp: !!usp,
+        has_trend: !!trend,
+        brief_id: data.briefId || "",
+        language: lang,
+      });
       toast.success(lang === "id" ? "Brief berhasil diracik!" : "Brief successfully compiled!");
-    } catch (err: any) { setErrorMsg(err.message); toast.error(err.message); } finally { setIsGenerating(false); }
+    } catch (err: any) {
+      setErrorMsg(err.message); toast.error(err.message);
+      // Pendo Track: Brief generation failed
+      window.pendo?.track("brief_generation_failed", {
+        error_message: String(err.message).substring(0, 100),
+        engine_mode: activeEngine,
+        platform: platform,
+        ref_type: refType,
+        shot_count: shotCount,
+        language: lang,
+      });
+    } finally { setIsGenerating(false); }
   };
 
   const handleMassExecuteImages = async () => {
@@ -952,8 +1032,27 @@ export function VibeShotPlatform() {
       const updatedWithImages = (data.shotlist || []).map((r: any, idx: number) => ({ ...shots[idx], image: String(r?.image || ""), imagePrompt: String(r?.imagePrompt || shots[idx].imagePrompt), }));
       setShots(updatedWithImages); setMoodboard(data.moodboard || []);
       saveToLocalStorage( updatedWithImages, data.moodboard || [], premiseOverride, titleOverride, masterIdentity, visualStyle, cloudBriefId );
+      // Pendo Track: Bulk images rendered
+      window.pendo?.track("bulk_images_rendered", {
+        brief_id: cloudBriefId || "",
+        shot_count: shots.length,
+        image_model: imageModel,
+        visual_style: visualStyle,
+        language: lang,
+      });
       toast.success(lang === "id" ? "Semua frame visual berhasil dirender!" : "All visual frames rendered!");
-    } catch (err: any) { toast.error(err.message); } finally { setIsRenderingVisuals(false); }
+    } catch (err: any) {
+      toast.error(err.message);
+      // Pendo Track: Image rendering failed (bulk)
+      window.pendo?.track("image_rendering_failed", {
+        error_message: String(err.message).substring(0, 100),
+        render_type: "bulk",
+        image_model: imageModel,
+        visual_style: visualStyle,
+        brief_id: cloudBriefId || "",
+        language: lang,
+      });
+    } finally { setIsRenderingVisuals(false); }
   };
 
   const handleLanjutkanCerita = async () => {
@@ -979,6 +1078,19 @@ export function VibeShotPlatform() {
       const finalShots = [...shots, ...normalizedNewShots]; const finalMood = [...moodboard, ...(data.moodboard || [])]; const finalPremise = `${premiseOverride}\n\n[Continuous Sequence]:\n${data.premise}`;
       setShots(finalShots); setMoodboard(finalMood); setPremiseOverride(finalPremise); setCloudBriefId(data.briefId || cloudBriefId);
       saveToLocalStorage( finalShots, finalMood, finalPremise, titleOverride, masterIdentity, visualStyle, data.briefId || cloudBriefId );
+      // Pendo Track: Story timeline extended
+      window.pendo?.track("story_timeline_extended", {
+        brief_id: data.briefId || cloudBriefId || "",
+        engine_mode: activeEngine,
+        existing_shot_count: shots.length,
+        new_shot_count: normalizedNewShots.length,
+        total_shot_count: finalShots.length,
+        platform: platform,
+        pillar: pillar,
+        talent: talent,
+        ref_type: refType,
+        language: lang,
+      });
       toast.success(lang === "id" ? "Alur berhasil disambung secara inline!" : "Timeline extended inline successfully!");
     } catch (err: any) { toast.error(err.message); } finally { setIsContinuing(false); }
   };
@@ -986,6 +1098,11 @@ export function VibeShotPlatform() {
   const handleShareLink = () => {
     if (!cloudBriefId) { toast.error("Cloud ID missing."); return; }
     navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?id=${cloudBriefId}`);
+    // Pendo Track: Brief shared
+    window.pendo?.track("brief_shared", {
+      brief_id: cloudBriefId || "",
+      language: lang,
+    });
     toast.success(t.shareSuccess);
   };
 
@@ -993,7 +1110,16 @@ export function VibeShotPlatform() {
     if (shots.length === 0) return;
     let htmlString = `<table border="1" style="border-collapse: collapse; font-family: Arial, sans-serif; width: 100%;"><tr style="background-color: #18181b; color: #ffffff; font-weight: bold;"><th>#</th><th>Camera Angle</th><th>Location</th><th>Action / Visual</th><th>Audio / VO</th></tr>`;
     shots.forEach((s, idx) => { htmlString += `<tr><td style="text-align: center; padding: 8px;">${idx + 1}</td><td>${s.angle}</td><td>${s.location}</td><td>${s.action}</td><td>${s.audio}</td></tr>`; }); htmlString += `</table>`;
-    try { await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([htmlString], { type: "text/html" }) })]); toast.success(lang === "id" ? "Struktur tabel berhasil disalin!" : "Table layout copied!"); } catch { toast.error("Copy failed."); }
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([htmlString], { type: "text/html" }) })]);
+      // Pendo Track: Production table exported
+      window.pendo?.track("production_table_exported", {
+        shot_count: shots.length,
+        brief_id: cloudBriefId || "",
+        language: lang,
+      });
+      toast.success(lang === "id" ? "Struktur tabel berhasil disalin!" : "Table layout copied!");
+    } catch { toast.error("Copy failed."); }
   };
 
   const handleExecuteSingleImage = async (shot: Shot) => {
@@ -1021,8 +1147,27 @@ export function VibeShotPlatform() {
       updateShot(shot.id, "image", data.imageUrl);
       setMoodboard(nextMood);
       saveToLocalStorage( nextShots, nextMood, premiseOverride, titleOverride, masterIdentity, visualStyle, cloudBriefId );
+      // Pendo Track: Single image rendered
+      window.pendo?.track("single_image_rendered", {
+        brief_id: cloudBriefId || "",
+        shot_id: shot.id,
+        image_model: imageModel,
+        visual_style: visualStyle,
+        language: lang,
+      });
       toast.success(lang === "id" ? "Visual adegan berhasil dirender!" : "Visual frame generated!");
-    } catch (err: any) { toast.error(err.message); } finally { setLoadingShotsImages(prev => ({ ...prev, [shot.id]: false })); }
+    } catch (err: any) {
+      toast.error(err.message);
+      // Pendo Track: Image rendering failed (single)
+      window.pendo?.track("image_rendering_failed", {
+        error_message: String(err.message).substring(0, 100),
+        render_type: "single",
+        image_model: imageModel,
+        visual_style: visualStyle,
+        brief_id: cloudBriefId || "",
+        language: lang,
+      });
+    } finally { setLoadingShotsImages(prev => ({ ...prev, [shot.id]: false })); }
   };
 
   const moodboardTiles = useMemo(() => {
