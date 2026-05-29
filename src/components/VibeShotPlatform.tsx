@@ -798,9 +798,20 @@ export function VibeShotPlatform() {
     });
 
     // Keep token in sync whenever auth state changes (login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user || null);
       setAccessToken(session?.access_token || "");
+
+      if (event === "SIGNED_IN" && session?.user) {
+        pendo.identify({
+          visitor: {
+            id: session.user.id,
+            email: session.user.email,
+          },
+        });
+      } else if (event === "SIGNED_OUT") {
+        pendo.clearSession();
+      }
     });
 
     return () => {
